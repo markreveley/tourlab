@@ -35,7 +35,9 @@ tourlab/
 │   ├── context.md       # Agent's working memory
 │   └── TODO.md          # Outstanding items and questions
 ├── agent               # CLI entry point
+├── agent.conf          # Backend configuration
 ├── SYSTEM.md           # System prompt + edit protocol
+├── CLAUDE.md           # Instructions for Claude Code
 └── README.md
 ```
 
@@ -57,11 +59,29 @@ cat state/emails/boston-tech.md | ./agent "extract relevant info for boston"
 
 ## Requirements
 
-One of:
-- `llm` CLI from [llm.datasette.io](https://llm.datasette.io) — `pip install llm`
-- `ANTHROPIC_API_KEY` environment variable set
+One of these backends:
+- **Claude Code** — `claude` CLI (uses Max subscription, no API costs)
+- **llm CLI** — from [llm.datasette.io](https://llm.datasette.io) — `pip install llm` (API costs)
+- **Direct API** — `ANTHROPIC_API_KEY` environment variable (API costs)
 
-And: `jq` (for API calls)
+And: `jq` (for direct API calls)
+
+## Configuration
+
+Set the backend in `agent.conf`:
+
+```bash
+AGENT_BACKEND=claude-code   # Uses Max subscription via Claude Code (default)
+AGENT_BACKEND=llm           # Uses llm CLI (API costs)
+AGENT_BACKEND=api           # Uses direct Anthropic API (API costs)
+AGENT_BACKEND=auto          # Auto-detect available backend
+```
+
+Or override with environment variable:
+
+```bash
+AGENT_BACKEND=llm ./agent "what needs attention?"
+```
 
 ## The Evidence Protocol
 

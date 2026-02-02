@@ -7,6 +7,12 @@
 #   cat state/emails/boston-tech.md | ./agent "extract relevant info"
 #   echo "summarize what needs attention" | ./agent
 #
+# Configuration:
+#   Set AGENT_BACKEND env var or create agent.conf with:
+#     AGENT_BACKEND=claude-code   # uses Max subscription via Claude Code
+#     AGENT_BACKEND=llm           # uses llm CLI (API costs)
+#     AGENT_BACKEND=api           # uses direct Anthropic API (API costs)
+#
 
 set -euo pipefail
 
@@ -14,6 +20,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="$SCRIPT_DIR/state"
 SYSTEM_PROMPT="$SCRIPT_DIR/SYSTEM.md"
 CONTEXT_FILE="$STATE_DIR/context.md"
+CONFIG_FILE="$SCRIPT_DIR/agent.conf"
+
+# Load config file if it exists (can be overridden by env vars)
+if [[ -f "$CONFIG_FILE" ]]; then
+    # shellcheck source=/dev/null
+    source "$CONFIG_FILE"
+fi
 
 # --- Helpers ---
 
@@ -105,7 +118,20 @@ build_prompt() {
     echo "$task"
 }
 
-# Call LLM using llm CLI (llm.datasette.io)
+# Call using Claude Code CLI (uses Max subscription)
+call_claude_code() {
+    local prompt="$1"
+
+    if ! command -v claude &>/dev/null; then
+        die "claude CLI not found. Install Claude Code: https://claude.ai/code"
+    fi
+
+    # Use print mode (-p) for non-interactive single-prompt usage
+    # --output-format text gives clean output without metadata
+    echo "$prompt" | claude -p --output-format text --max-turns 1
+}
+
+# Call using llm CLI (llm.datasette.io)
 call_llm_cli() {
     local prompt="$1"
 
@@ -116,7 +142,7 @@ call_llm_cli() {
     echo "$prompt" | llm -m "${LLM_MODEL:-claude-3.5-sonnet}"
 }
 
-# Call LLM using curl to Anthropic API
+# Call using curl to Anthropic API
 call_anthropic_api() {
     local prompt="$1"
 
@@ -140,17 +166,37 @@ call_anthropic_api() {
     echo "$response" | jq -r '.content[0].text // .error.message // "Unknown error"'
 }
 
-# Main LLM call - tries llm CLI first, falls back to API
+# Main LLM call - routes based on AGENT_BACKEND config
 call_llm() {
     local prompt="$1"
+    local backend="${AGENT_BACKEND:-auto}"
 
-    if command -v llm &>/dev/null; then
-        call_llm_cli "$prompt"
-    elif [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
-        call_anthropic_api "$prompt"
-    else
-        die "No LLM available. Install llm CLI (pip install llm) or set ANTHROPIC_API_KEY"
-    fi
+    case "$backend" in
+        claude-code|cc)
+            call_claude_code "$prompt"
+            ;;
+        llm)
+            call_llm_cli "$prompt"
+            ;;
+        api)
+            call_anthropic_api "$prompt"
+            ;;
+        auto)
+            # Auto-detect: prefer claude-code, then llm, then api
+            if command -v claude &>/dev/null; then
+                call_claude_code "$prompt"
+            elif command -v llm &>/dev/null; then
+                call_llm_cli "$prompt"
+            elif [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+                call_anthropic_api "$prompt"
+            else
+                die "No backend available. Set AGENT_BACKEND or install claude/llm CLI"
+            fi
+            ;;
+        *)
+            die "Unknown AGENT_BACKEND: $backend (use: claude-code, llm, api, or auto)"
+            ;;
+    esac
 }
 
 # --- Main ---
