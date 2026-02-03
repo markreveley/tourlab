@@ -28,6 +28,9 @@ The agent helps extract information from emails and maintain accurate state file
 
 ```
 tourlab/
+├── .claude/
+│   └── skills/         # Custom Claude Code slash commands
+│       └── ship.md     # /ship - commit with README enforcement
 ├── state/
 │   ├── dates/           # Per-date files (YYYY-MM-DD-city.md)
 │   ├── venues/          # Reusable venue info (venue-slug.md)
@@ -138,6 +141,36 @@ grep -l "load_in_time: null" state/dates/*.md
 2. Include full headers and timestamps
 3. Mark as read-only (agent reads but never modifies)
 4. Run agent with the email as input to extract information
+
+## Development
+
+### Committing changes
+
+Use `/ship` in Claude Code to commit with documentation enforcement:
+
+1. `/ship` triggers semantic review — Claude verifies README matches code changes
+2. Git pre-commit hook provides syntactic backstop — blocks if README wasn't touched
+
+This two-layer approach ensures documentation stays current.
+
+### Setting up the pre-commit hook
+
+The hook isn't version-controlled (lives in `.git/`). To set it up:
+
+```bash
+cat > .git/hooks/pre-commit << 'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+staged=$(git diff --cached --name-only)
+code=$(echo "$staged" | grep -vE '\.(md|json)$|^\.gitignore$|^\.' | head -1 || true)
+readme=$(echo "$staged" | grep -q '^README\.md$' && echo yes || true)
+if [[ -n "$code" && -z "$readme" ]]; then
+    echo "ERROR: Code changed but README.md not updated"
+    exit 1
+fi
+EOF
+chmod +x .git/hooks/pre-commit
+```
 
 ## Why This Way?
 
