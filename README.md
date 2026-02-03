@@ -1,102 +1,73 @@
 # tourlab
 
-A Unix-shaped tour advancing agent. Files are context, git is the audit trail, the terminal is the interface.
+A tour advancing agent built on [agen](https://github.com/markreveley/agen).
 
-## Philosophy
+Files are context, git is the audit trail, the terminal is the interface.
 
-This is a thesis validation project for "Unix Agentics" — the idea that agents should be files, processes, and streams, not chat interfaces.
+## What This Is
 
-**Core beliefs:**
+A **template repository** for managing concert tour logistics. Clone it, replace the example data with your tour, commit your changes.
 
-- **Files are the context substrate.** Not databases, not vector stores — markdown files you can grep.
-- **Git is the audit trail.** Every state change is a commit. `git log` tells you what happened and when.
-- **The agent is a CLI tool.** Scriptable, composable, observable with standard Unix tools.
-- **Evidence over inference.** No field changes without source documents and quotes.
-- **Observability by construction.** `find`, `grep`, `cat`, `git log` — no custom dashboards needed.
+The `agent` script wraps [agen](https://github.com/markreveley/agen) with tour-advancing context:
+- SYSTEM.md defines the agent's identity and rules
+- state/ contains your tour data (dates, venues, emails)
+- The agent knows what files exist and can reference them
 
-## Domain: Tour Advancing
+## Quick Start
 
-Tour advancing coordinates logistics for concert dates. Each date progresses through:
+```bash
+# 1. Clone
+git clone https://github.com/youruser/tourlab.git my-tour
+cd my-tour
 
+# 2. Install agen (if not already)
+# See: https://github.com/markreveley/agen
+
+# 3. Replace example data
+rm state/dates/*.md state/venues/*.md
+# Add your own dates and venues
+
+# 4. Use
+./agent "what dates need attention?"
+cat email.txt | ./agent "extract info for the boston date"
 ```
-unconfirmed → confirmed → advancing → complete
-```
-
-The agent helps extract information from emails and maintain accurate state files with full evidence trails.
 
 ## Structure
 
 ```
 tourlab/
-├── .claude/
-│   └── skills/         # Custom Claude Code slash commands
-│       └── ship.md     # /ship - commit with README enforcement
-├── docs/
-│   └── architecture/   # Technical design documents
-│       ├── api_vs_cli.md   # Why Claude Code + --tools "" is a good fit
-│       └── claude_code.md  # Skills, hooks, and enforcement patterns
+├── agent              # Wrapper script (calls agen)
+├── SYSTEM.md          # Agent identity + evidence protocol
 ├── state/
-│   ├── dates/           # Per-date files (YYYY-MM-DD-city.md)
-│   ├── venues/          # Reusable venue info (venue-slug.md)
-│   ├── emails/          # Source documents (read-only to agent)
-│   ├── context.md       # Agent's working memory
-│   └── TODO.md          # Outstanding items and questions
-├── agent               # CLI entry point
-├── agent.conf          # Backend configuration
-├── SYSTEM.md           # System prompt + edit protocol
-├── CLAUDE.md           # Instructions for Claude Code
+│   ├── dates/         # Per-date files (YYYY-MM-DD-city.md)
+│   ├── venues/        # Reusable venue info
+│   ├── emails/        # Source documents (agent reads, never modifies)
+│   ├── context.md     # Working memory
+│   └── TODO.md        # Outstanding questions
 └── README.md
 ```
+
+The `state/` directory ships with **example data**. Replace it with your tour.
+
+## Requirements
+
+- [agen](https://github.com/markreveley/agen) in PATH
+- One of agen's backends (Claude Code, llm CLI, or API key)
 
 ## Usage
 
 ```bash
-# Ask questions about current state
+# Ask questions
 ./agent "what dates are missing tech specs?"
 
 # Process an email
 cat state/emails/boston-tech.md | ./agent "extract relevant info for boston"
 
-# Summarize work needed
+# Summarize
 ./agent "what needs attention this week?"
 
-# Pipe workflows
-./agent "list all null fields for confirmed dates" | grep "load_in"
-```
-
-## Requirements
-
-One of these backends:
-- **Claude Code** — `claude` CLI (uses Max subscription, no API costs)
-- **llm CLI** — from [llm.datasette.io](https://llm.datasette.io) — `pip install llm` (API costs)
-- **Direct API** — `ANTHROPIC_API_KEY` environment variable (API costs)
-
-And: `jq` (for direct API calls)
-
-## Configuration
-
-Set the backend in `agent.conf`:
-
-```bash
-AGENT_BACKEND=claude-code   # Uses Max subscription via Claude Code (default)
-AGENT_BACKEND=llm           # Uses llm CLI (API costs)
-AGENT_BACKEND=api           # Uses direct Anthropic API (API costs)
-AGENT_BACKEND=auto          # Auto-detect available backend
-```
-
-Or override with environment variable:
-
-```bash
-AGENT_BACKEND=llm ./agent "what needs attention?"
-```
-
-## Debugging
-
-Inspect the prompt without sending to the LLM:
-
-```bash
-DEBUG=1 ./agent "your task"              # print full prompt
-DEBUG=1 ./agent "your task" > prompt.md  # save for inspection
+# Pipeline
+./agent "list all null fields" | grep "load_in"
 ```
 
 ## The Evidence Protocol
@@ -110,7 +81,7 @@ Quote: "Load in will be at 2pm, please have trucks at loading dock by 1:45"
 Changed: `load_in_time: null` → `load_in_time: 14:00`
 ```
 
-No guessing. No inference. If it's ambiguous, it goes to `TODO.md` as a question.
+No guessing. No inference. If it's ambiguous, it goes to TODO.md as a question.
 
 ## Observability
 
@@ -124,10 +95,7 @@ grep ": null" state/dates/2026-03-15-boston.md
 # What evidence do we have?
 grep -A3 "^### " state/dates/*.md
 
-# What's outstanding?
-cat state/TODO.md
-
-# Find all dates missing load-in times
+# Find dates missing load-in times
 grep -l "load_in_time: null" state/dates/*.md
 ```
 
@@ -135,93 +103,42 @@ grep -l "load_in_time: null" state/dates/*.md
 
 1. Copy an existing date file as template
 2. Update frontmatter fields
-3. Set status to `unconfirmed` or `confirmed`
+3. Set status to `unconfirmed`, `confirmed`, or `advancing`
 4. Leave unknown fields as `null`
 5. Add outstanding questions to the Outstanding section
 
 ## Adding Emails
 
-1. Copy email thread content to `state/emails/descriptive-name.md`
-2. Include full headers and timestamps
-3. Mark as read-only (agent reads but never modifies)
-4. Run agent with the email as input to extract information
+1. Copy email content to `state/emails/descriptive-name.md`
+2. Include headers and timestamps
+3. Run: `cat state/emails/name.md | ./agent "extract info for [city]"`
 
-## Development
+## How It Works
 
-This project uses Claude Code for development. Documentation enforcement is handled by a two-layer system.
-
-### The `/ship` workflow
-
-Instead of committing directly, use `/ship` in Claude Code:
-
-```
-/ship
-```
-
-This triggers a commit checkpoint that:
-
-1. **Reviews changes** — Lists all modified files
-2. **Semantic README check** — Claude verifies documentation matches code changes
-3. **Updates README if needed** — Before proceeding with commit
-4. **Commits** — With a descriptive message
-5. **Reports status** — Shows what was committed and commits ahead of origin
-
-### Why two layers?
-
-| Layer | Type | What it checks | Enforcement |
-|-------|------|----------------|-------------|
-| `/ship` skill | Semantic | README *correctly* documents changes | Soft (LLM judgment) |
-| Git pre-commit hook | Syntactic | README was *touched* | Hard (blocks commit) |
-
-The skill does the real work (semantic verification). The hook is a backstop for "forgot entirely."
-
-See [docs/architecture/claude_code.md](docs/architecture/claude_code.md) for details on skills vs hooks.
-
-### First-time setup
-
-**1. Install the `/ship` skill** (required for new clones):
+The `agent` script is pure shell. It builds context deterministically (no LLM), then calls agen:
 
 ```bash
-mkdir -p ~/.claude/skills
-cp .claude/skills/ship.md ~/.claude/skills/
+# What agent does (simplified):
+{
+  cat SYSTEM.md
+  cat state/context.md
+  ls state/dates/*.md state/venues/*.md
+} > context.tmp
+
+agen --system=context.tmp "$@"
 ```
 
-Then restart your Claude Code session.
-
-**2. Set up the pre-commit hook** (lives in `.git/`, not version-controlled):
-
-```bash
-cat > .git/hooks/pre-commit << 'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-staged=$(git diff --cached --name-only)
-code=$(echo "$staged" | grep -vE '\.(md|json)$|^\.gitignore$|^\.' | head -1 || true)
-readme=$(echo "$staged" | grep -q '^README\.md$' && echo yes || true)
-if [[ -n "$code" && -z "$readme" ]]; then
-    echo "ERROR: Code changed but README.md not updated"
-    exit 1
-fi
-EOF
-chmod +x .git/hooks/pre-commit
-```
-
-### Bypassing (when needed)
-
-If a code change genuinely doesn't need documentation:
-
-```bash
-git commit --no-verify -m "your message"
-```
-
-Use sparingly. If you're bypassing often, the enforcement is miscalibrated.
+The LLM only gets called at the end, via agen. Everything before that is just file concatenation.
 
 ## Why This Way?
 
 Chat interfaces are session-isolated and ephemeral. This approach:
 
-- **Persists** — State survives sessions. Pick up where you left off.
-- **Composes** — Pipe agents together. Script workflows. Integrate with other tools.
-- **Audits** — Every change has a commit. Every field has evidence.
-- **Observes** — Debug with grep, not dashboards.
+- **Persists** — State survives sessions
+- **Composes** — Pipe agents, script workflows
+- **Audits** — Every change is a commit, every field has evidence
+- **Observes** — Debug with grep, not dashboards
 
-The terminal is a 50-year-old prototype of an agentic interface. This project takes that seriously.
+## License
+
+MIT
