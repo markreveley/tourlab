@@ -7,31 +7,144 @@
 #   cat state/emails/boston-tech.md | ./agent "extract relevant info"
 #   echo "summarize what needs attention" | ./agent
 #
+###############################################################################
+#
+# PROMPT CONSTRUCTION MENTAL MODEL
+# ================================
+#
+# An LLM prompt is not just "the question you ask." It's the ENTIRE context
+# window — everything the model sees when it generates a response. Think of
+# it like setting up a workspace before asking someone to do a task:
+#
+#   1. Who they are and how they should behave (system prompt / identity)
+#   2. What they already know (loaded context / working memory)
+#   3. What resources are available (file inventory / tool awareness)
+#   4. The specific material to work with (input documents)
+#   5. What you actually want them to do (the task)
+#
+# This script constructs a prompt by LAYERING these components. Each layer
+# serves a specific purpose in shaping the model's behavior and output.
+#
+# THE PROMPT STRUCTURE WE BUILD:
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │ SYSTEM.md                                                               │
+# │ (Identity + Domain Knowledge + Behavioral Rules)                        │
+# │ "You are a tour advancing agent. Here's how tour advancing works.       │
+# │  Here are the rules you MUST follow when editing files..."              │
+# ├─────────────────────────────────────────────────────────────────────────┤
+# │ context.md                                                              │
+# │ (Working Memory / Session State)                                        │
+# │ "Currently focusing on the March Boston run. Last action was..."        │
+# ├─────────────────────────────────────────────────────────────────────────┤
+# │ File Inventory                                                          │
+# │ (What Resources Exist)                                                  │
+# │ "Available: 2026-03-15-boston.md, house-of-blues-boston.md, TODO.md"    │
+# ├─────────────────────────────────────────────────────────────────────────┤
+# │ Input Document (if piped via stdin)                                     │
+# │ (The Material to Process)                                               │
+# │ "From: venue@hob.com Subject: Re: March 15 advance..."                  │
+# ├─────────────────────────────────────────────────────────────────────────┤
+# │ Task                                                                    │
+# │ (What To Do)                                                            │
+# │ "Extract relevant info for the Boston date"                             │
+# └─────────────────────────────────────────────────────────────────────────┘
+#
+# WHY THIS LAYERING MATTERS:
+#
+# - The model reads top-to-bottom. Earlier content "primes" interpretation
+#   of later content. Put identity and rules first so they frame everything.
+#
+# - Separation with "---" creates visual/semantic boundaries. The model
+#   understands these as "different sections" rather than continuous prose.
+#
+# - The inventory tells the model what EXISTS without loading it all. This is
+#   "just-in-time" context — the model knows files are available and can
+#   reference them, but we don't burn tokens loading everything upfront.
+#
+# - The task comes LAST because it's the "innermost binding" — the most
+#   specific instruction that should take precedence over general rules.
+#
+###############################################################################
 
 set -euo pipefail
+
+# =============================================================================
+# PATH SETUP
+# =============================================================================
+# We need absolute paths because this script might be called from anywhere.
+# SCRIPT_DIR is where the agent script lives (project root).
+# All other paths are relative to this, making the project self-contained.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="$SCRIPT_DIR/state"
 SYSTEM_PROMPT="$SCRIPT_DIR/SYSTEM.md"
 CONTEXT_FILE="$STATE_DIR/context.md"
 
-# --- Helpers ---
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
 
 die() {
     echo "error: $1" >&2
     exit 1
 }
 
-# Check if stdin has data (non-blocking)
+# -----------------------------------------------------------------------------
+# has_stdin - Detect if data is being piped to us
+# -----------------------------------------------------------------------------
+# This enables the Unix filter pattern: `cat file | ./agent "do something"`
+#
+# [[ -t 0 ]] tests if file descriptor 0 (stdin) is a terminal.
+# - If stdin IS a terminal → user is typing interactively → no piped data
+# - If stdin is NOT a terminal → data is being piped in
+#
+# This is how Unix tools like `grep` and `sed` know whether to read from
+# a pipe or wait for arguments.
+# -----------------------------------------------------------------------------
 has_stdin() {
     [[ -t 0 ]] && return 1 || return 0
 }
 
-# Build inventory of state files
+# -----------------------------------------------------------------------------
+# build_inventory - Tell the LLM what files exist WITHOUT loading them
+# -----------------------------------------------------------------------------
+# This is a KEY CONCEPT in context engineering: AWARENESS vs LOADING.
+#
+# PROBLEM: The context window is finite (e.g., 100k-200k tokens). If we
+# loaded every date file, venue file, and email into every prompt, we'd:
+#   1. Burn tokens on irrelevant content
+#   2. Hit context limits quickly
+#   3. Pay more money (tokens cost money)
+#   4. Dilute the signal with noise
+#
+# SOLUTION: Tell the model what EXISTS, let it decide what to REQUEST.
+#
+# By listing filenames, we give the model:
+#   - Awareness: "There's a file called 2026-03-15-boston.md"
+#   - Affordance: It can say "I need to read state/dates/2026-03-15-boston.md"
+#   - Efficiency: We only load what's actually needed
+#
+# This is "progressive disclosure" — reveal information as needed, not all
+# at once. The filesystem becomes a database the model can query.
+#
+# OUTPUT FORMAT:
+#   ## Available State Files
+#
+#   ### Dates
+#   - 2026-03-15-boston.md
+#
+#   ### Venues
+#   - house-of-blues-boston.md
+#
+# The markdown structure helps the model parse and reference these files.
+# -----------------------------------------------------------------------------
 build_inventory() {
     echo "## Available State Files"
     echo ""
 
+    # --- Date files ---
+    # These are the core work units. Each represents a show to be advanced.
+    # The naming convention (YYYY-MM-DD-city.md) is self-documenting.
     if [[ -d "$STATE_DIR/dates" ]] && [[ -n "$(ls -A "$STATE_DIR/dates" 2>/dev/null)" ]]; then
         echo "### Dates"
         for f in "$STATE_DIR/dates"/*.md; do
@@ -40,6 +153,9 @@ build_inventory() {
         echo ""
     fi
 
+    # --- Venue files ---
+    # Reusable venue information. The model might need to check venue specs
+    # when processing a date at that venue.
     if [[ -d "$STATE_DIR/venues" ]] && [[ -n "$(ls -A "$STATE_DIR/venues" 2>/dev/null)" ]]; then
         echo "### Venues"
         for f in "$STATE_DIR/venues"/*.md; do
@@ -48,6 +164,10 @@ build_inventory() {
         echo ""
     fi
 
+    # --- Email files ---
+    # Source documents. These are READ-ONLY to the agent — it extracts
+    # information from them but never modifies them. They're the "evidence"
+    # that backs any field changes.
     if [[ -d "$STATE_DIR/emails" ]] && [[ -n "$(ls -A "$STATE_DIR/emails" 2>/dev/null)" ]]; then
         echo "### Emails"
         for f in "$STATE_DIR/emails"/*.md; do
@@ -56,6 +176,10 @@ build_inventory() {
         echo ""
     fi
 
+    # --- TODO.md ---
+    # Outstanding items. The model should check this to avoid re-asking
+    # questions that are already tracked, and should ADD to it when it
+    # encounters ambiguity (per SYSTEM.md rules).
     if [[ -f "$STATE_DIR/TODO.md" ]]; then
         echo "### Outstanding"
         echo "- TODO.md"
@@ -63,18 +187,77 @@ build_inventory() {
     fi
 }
 
-# Build the full prompt for the LLM
+# -----------------------------------------------------------------------------
+# build_prompt - Assemble the complete prompt from components
+# -----------------------------------------------------------------------------
+# This is where CONTEXT ENGINEERING happens. We're not just asking a question;
+# we're constructing an ENVIRONMENT for the model to operate in.
+#
+# ANALOGY: Imagine hiring a contractor. You don't just say "fix the plumbing."
+# You give them:
+#   1. Your expectations and standards (system prompt)
+#   2. Context about the project (what's been done, current state)
+#   3. Access to blueprints and materials (file inventory)
+#   4. The specific work order (task)
+#
+# The ORDER matters. LLMs process text sequentially, and earlier content
+# influences interpretation of later content. This is why:
+#   - Identity/rules come FIRST (establishes frame for everything)
+#   - Context comes SECOND (provides background for the task)
+#   - Inventory comes THIRD (shows what's available to work with)
+#   - Input document comes FOURTH (the material to process)
+#   - Task comes LAST (the specific instruction, highest priority)
+#
+# SEPARATION: We use "---" (markdown horizontal rule) between sections.
+# This creates clear boundaries. The model understands these as semantic
+# breaks, not continuous text. It helps prevent "context bleed" where
+# content from one section inappropriately influences another.
+# -----------------------------------------------------------------------------
 build_prompt() {
     local task="$1"
     local stdin_content="$2"
 
-    # System prompt
+    # -------------------------------------------------------------------------
+    # LAYER 1: SYSTEM PROMPT (Identity + Domain Knowledge + Rules)
+    # -------------------------------------------------------------------------
+    # This is the "who you are" layer. SYSTEM.md contains:
+    #   - Domain expertise (what tour advancing IS)
+    #   - Behavioral rules (the evidence protocol)
+    #   - Constraints (what NOT to do)
+    #
+    # By putting this FIRST, every subsequent piece of content is interpreted
+    # through this lens. When the model later sees an email, it knows it's
+    # looking for evidence to support field updates, not just summarizing.
+    #
+    # This is analogous to a "system prompt" in chat APIs, but we're using
+    # a single-turn pattern where everything goes in the user message.
+    # The effect is similar: establish identity before presenting the task.
+    # -------------------------------------------------------------------------
     cat "$SYSTEM_PROMPT"
     echo ""
     echo "---"
     echo ""
 
-    # Current context (working memory)
+    # -------------------------------------------------------------------------
+    # LAYER 2: CURRENT CONTEXT (Working Memory / Session State)
+    # -------------------------------------------------------------------------
+    # This is "what you've been working on." Unlike chat interfaces where
+    # context accumulates in conversation history, we persist it to a FILE.
+    #
+    # WHY A FILE INSTEAD OF CONVERSATION HISTORY?
+    #   - Survives session boundaries (pick up where you left off)
+    #   - Editable by humans (you can manually adjust the agent's focus)
+    #   - Versionable (git tracks changes to working memory)
+    #   - Inspectable (cat context.md to see what the agent "knows")
+    #
+    # The context.md file might contain:
+    #   - What the agent was last working on
+    #   - Decisions made in previous sessions
+    #   - Notes about ongoing issues
+    #
+    # This is how we achieve PERSISTENCE without a database — the filesystem
+    # IS the database, and context.md is the "current session" table.
+    # -------------------------------------------------------------------------
     if [[ -f "$CONTEXT_FILE" ]]; then
         echo "## Current Context"
         echo ""
@@ -84,12 +267,41 @@ build_prompt() {
         echo ""
     fi
 
-    # File inventory
+    # -------------------------------------------------------------------------
+    # LAYER 3: FILE INVENTORY (Available Resources)
+    # -------------------------------------------------------------------------
+    # This tells the model what files EXIST without loading their contents.
+    # See build_inventory() for detailed explanation.
+    #
+    # The model can now say things like:
+    #   "I need to check state/dates/2026-03-15-boston.md to see current values"
+    #   "I should update state/TODO.md with this question"
+    #
+    # This is AFFORDANCE — showing the model what actions are possible.
+    # It's like showing someone where the tools are before asking them
+    # to fix something.
+    # -------------------------------------------------------------------------
     build_inventory
     echo "---"
     echo ""
 
-    # Stdin content if provided
+    # -------------------------------------------------------------------------
+    # LAYER 4: INPUT DOCUMENT (Material to Process)
+    # -------------------------------------------------------------------------
+    # When you pipe content to the agent:
+    #   cat state/emails/boston-tech.md | ./agent "extract info"
+    #
+    # That piped content appears here. This is the "what to work on" layer.
+    #
+    # WHY SEPARATE FROM THE TASK?
+    # The task says WHAT TO DO. The input document is WHAT TO DO IT WITH.
+    # Separating them lets you reuse the same task with different inputs:
+    #   cat email1.md | ./agent "extract tech specs"
+    #   cat email2.md | ./agent "extract tech specs"
+    #
+    # This is the Unix philosophy: stdin as universal input interface.
+    # Any tool that produces text can feed this agent.
+    # -------------------------------------------------------------------------
     if [[ -n "$stdin_content" ]]; then
         echo "## Input Document"
         echo ""
@@ -99,13 +311,50 @@ build_prompt() {
         echo ""
     fi
 
-    # The task
+    # -------------------------------------------------------------------------
+    # LAYER 5: TASK (The Specific Instruction)
+    # -------------------------------------------------------------------------
+    # This comes LAST because it's the most specific instruction.
+    # In programming terms, this is the "innermost scope" — it can reference
+    # everything above it, and it takes precedence when there's ambiguity.
+    #
+    # If SYSTEM.md says "always cite evidence" and the task says "just give
+    # me a quick summary," the model must reconcile these. By putting the
+    # task last, we make it the "active" instruction while the system prompt
+    # remains the "background" constraint.
+    #
+    # Good tasks are:
+    #   - Specific: "extract load-in time" not "process this"
+    #   - Action-oriented: "update the Boston date file" not "here's an email"
+    #   - Scoped: "for the March 15 date" not "for everything"
+    # -------------------------------------------------------------------------
     echo "## Task"
     echo ""
     echo "$task"
 }
 
-# Call LLM using llm CLI (llm.datasette.io)
+# =============================================================================
+# LLM INTERFACE FUNCTIONS
+# =============================================================================
+# These functions handle the actual API calls. The prompt construction above
+# is LLM-agnostic — it produces text that any LLM can process. These functions
+# handle the vendor-specific transport.
+
+# -----------------------------------------------------------------------------
+# call_llm_cli - Use Simon Willison's `llm` CLI tool
+# -----------------------------------------------------------------------------
+# llm (https://llm.datasette.io) is a command-line tool that wraps multiple
+# LLM providers. It handles API keys, model selection, and response parsing.
+#
+# WHY USE A CLI WRAPPER?
+#   - Simpler than raw curl (no JSON construction)
+#   - Supports multiple providers (OpenAI, Anthropic, local models)
+#   - Handles authentication via its own config
+#   - Maintains conversation history (though we don't use that here)
+#
+# The `-m` flag selects the model. We default to claude-3.5-sonnet but
+# allow override via LLM_MODEL environment variable for experimentation.
+# -----------------------------------------------------------------------------
 call_llm_cli() {
     local prompt="$1"
 
@@ -113,10 +362,45 @@ call_llm_cli() {
         die "llm CLI not found. Install: pip install llm"
     fi
 
+    # Pipe the prompt to llm's stdin. The entire constructed prompt
+    # becomes a single user message.
     echo "$prompt" | llm -m "${LLM_MODEL:-claude-3.5-sonnet}"
 }
 
-# Call LLM using curl to Anthropic API
+# -----------------------------------------------------------------------------
+# call_anthropic_api - Direct API call to Claude
+# -----------------------------------------------------------------------------
+# This is the "no dependencies" path — just curl and jq.
+#
+# THE API STRUCTURE:
+# Anthropic's Messages API expects:
+#   {
+#     "model": "claude-sonnet-4-20250514",
+#     "max_tokens": 4096,
+#     "messages": [{"role": "user", "content": "..."}]
+#   }
+#
+# We're using a SINGLE-TURN pattern: one user message containing the entire
+# constructed prompt. This is simpler than multi-turn and works well for
+# task-based interactions.
+#
+# ALTERNATIVE: SYSTEM PARAMETER
+# The API also supports a "system" parameter for system prompts:
+#   {
+#     "system": "You are a tour advancing agent...",
+#     "messages": [{"role": "user", "content": "task here"}]
+#   }
+#
+# We're NOT using this because:
+#   1. Keeping everything in one message is simpler to debug (just echo $prompt)
+#   2. The layered structure works well as continuous text
+#   3. It's more portable across LLM providers (not all have system params)
+#
+# JQ USAGE:
+# `jq -n` creates JSON from scratch (not from input)
+# `--arg prompt "$prompt"` safely escapes the prompt for JSON
+# This handles quotes, newlines, and special characters correctly.
+# -----------------------------------------------------------------------------
 call_anthropic_api() {
     local prompt="$1"
 
@@ -137,10 +421,19 @@ call_anthropic_api() {
                 messages: [{role: "user", content: $prompt}]
             }')")
 
+    # Extract the text response, with fallbacks for error handling
+    # .content[0].text - normal successful response
+    # .error.message - API error (auth, rate limit, etc.)
+    # "Unknown error" - something unexpected
     echo "$response" | jq -r '.content[0].text // .error.message // "Unknown error"'
 }
 
-# Main LLM call - tries llm CLI first, falls back to API
+# -----------------------------------------------------------------------------
+# call_llm - Dispatch to available LLM interface
+# -----------------------------------------------------------------------------
+# Try llm CLI first (better UX, more features), fall back to direct API.
+# This makes the tool work in more environments without configuration.
+# -----------------------------------------------------------------------------
 call_llm() {
     local prompt="$1"
 
@@ -153,21 +446,45 @@ call_llm() {
     fi
 }
 
-# --- Main ---
+# =============================================================================
+# MAIN ENTRY POINT
+# =============================================================================
 
 main() {
-    # Get task from argument or stdin
+    # -------------------------------------------------------------------------
+    # INPUT HANDLING: Support multiple invocation patterns
+    # -------------------------------------------------------------------------
+    # Unix tools should be flexible about how they receive input. We support:
+    #
+    # 1. Task as argument:
+    #    ./agent "what dates need attention?"
+    #
+    # 2. Input piped, task as argument:
+    #    cat email.md | ./agent "extract tech specs"
+    #
+    # 3. Input piped, default task:
+    #    cat email.md | ./agent
+    #    (Uses generic "process this input" task)
+    #
+    # This flexibility enables composition:
+    #    find state/emails -name "*.md" -exec cat {} \; | ./agent "summarize all"
+    #    ./agent "list dates" | grep "boston"
+    # -------------------------------------------------------------------------
     local task=""
     local stdin_content=""
 
+    # Check for piped input FIRST, before reading arguments
+    # This must happen before any other stdin reading
     if has_stdin; then
         stdin_content="$(cat)"
     fi
 
+    # Task from command line arguments (all args joined)
     if [[ $# -gt 0 ]]; then
         task="$*"
     elif [[ -n "$stdin_content" ]] && [[ -z "$task" ]]; then
-        # If only stdin provided, treat last line as task or use default
+        # Stdin provided but no explicit task — use a sensible default
+        # This enables: cat email.md | ./agent
         task="Process this input and update relevant state files."
     fi
 
@@ -175,15 +492,32 @@ main() {
         die "Usage: ./agent \"task\" or command | ./agent \"task\""
     fi
 
-    # Verify structure exists
+    # -------------------------------------------------------------------------
+    # VALIDATE ENVIRONMENT
+    # -------------------------------------------------------------------------
+    # Fail fast if the required structure doesn't exist. This catches
+    # common errors like running from the wrong directory.
+    # -------------------------------------------------------------------------
     [[ -f "$SYSTEM_PROMPT" ]] || die "SYSTEM.md not found"
     [[ -d "$STATE_DIR" ]] || die "state/ directory not found"
 
-    # Build and send prompt
+    # -------------------------------------------------------------------------
+    # BUILD AND EXECUTE
+    # -------------------------------------------------------------------------
+    # This is where everything comes together:
+    # 1. build_prompt() constructs the layered context
+    # 2. call_llm() sends it to the model
+    # 3. Response goes to stdout (can be piped to other tools)
+    #
+    # DEBUG TIP: To see the constructed prompt without calling the LLM:
+    #    task="test" stdin_content="" build_prompt "$task" "$stdin_content"
+    # Or add: echo "$prompt" > /tmp/last_prompt.txt before call_llm
+    # -------------------------------------------------------------------------
     local prompt
     prompt="$(build_prompt "$task" "$stdin_content")"
 
     call_llm "$prompt"
 }
 
+# Run main with all script arguments
 main "$@"
