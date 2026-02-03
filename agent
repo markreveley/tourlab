@@ -13,6 +13,9 @@
 #     AGENT_BACKEND=llm           # uses llm CLI (API costs)
 #     AGENT_BACKEND=api           # uses direct Anthropic API (API costs)
 #
+# Debug:
+#   DEBUG=1 ./agent "task"        # prints prompt without sending to LLM
+#
 
 set -euo pipefail
 
@@ -229,6 +232,12 @@ main() {
     # Build and send prompt
     local prompt
     prompt="$(build_prompt "$task" "$stdin_content")"
+
+    # Debug mode: print prompt and exit
+    if [[ "${DEBUG:-}" == "1" ]]; then
+        echo "$prompt"
+        exit 0
+    fi
 
     call_llm "$prompt"
 }

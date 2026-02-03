@@ -83,6 +83,15 @@ Or override with environment variable:
 AGENT_BACKEND=llm ./agent "what needs attention?"
 ```
 
+## Debugging
+
+Inspect the prompt without sending to the LLM:
+
+```bash
+DEBUG=1 ./agent "your task"              # print full prompt
+DEBUG=1 ./agent "your task" > prompt.md  # save for inspection
+```
+
 ## The Evidence Protocol
 
 Every field change must have an evidence entry:
