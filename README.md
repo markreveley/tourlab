@@ -33,6 +33,7 @@ tourlab/
 │       └── ship.md     # /ship - commit with README enforcement
 ├── docs/
 │   └── architecture/   # Technical design documents
+│       ├── api_vs_cli.md   # Why Claude Code + --tools "" is a good fit
 │       └── claude_code.md  # Skills, hooks, and enforcement patterns
 ├── state/
 │   ├── dates/           # Per-date files (YYYY-MM-DD-city.md)
