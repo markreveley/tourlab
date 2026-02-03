@@ -127,8 +127,9 @@ call_claude_code() {
     fi
 
     # Use print mode (-p) for non-interactive single-prompt usage
+    # --tools "" disables all tools so CC acts as pure LLM (no file access, no bash)
     # --output-format text gives clean output without metadata
-    echo "$prompt" | claude -p --output-format text --max-turns 1
+    echo "$prompt" | claude -p --tools "" --output-format text
 }
 
 # Call using llm CLI (llm.datasette.io)
