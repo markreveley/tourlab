@@ -31,6 +31,9 @@ tourlab/
 ├── .claude/
 │   └── skills/         # Custom Claude Code slash commands
 │       └── ship.md     # /ship - commit with README enforcement
+├── docs/
+│   └── architecture/   # Technical design documents
+│       └── claude_code.md  # Skills, hooks, and enforcement patterns
 ├── state/
 │   ├── dates/           # Per-date files (YYYY-MM-DD-city.md)
 │   ├── venues/          # Reusable venue info (venue-slug.md)
@@ -144,18 +147,47 @@ grep -l "load_in_time: null" state/dates/*.md
 
 ## Development
 
-### Committing changes
+This project uses Claude Code for development. Documentation enforcement is handled by a two-layer system.
 
-Use `/ship` in Claude Code to commit with documentation enforcement:
+### The `/ship` workflow
 
-1. `/ship` triggers semantic review — Claude verifies README matches code changes
-2. Git pre-commit hook provides syntactic backstop — blocks if README wasn't touched
+Instead of committing directly, use `/ship` in Claude Code:
 
-This two-layer approach ensures documentation stays current.
+```
+/ship
+```
 
-### Setting up the pre-commit hook
+This triggers a commit checkpoint that:
 
-The hook isn't version-controlled (lives in `.git/`). To set it up:
+1. **Reviews changes** — Lists all modified files
+2. **Semantic README check** — Claude verifies documentation matches code changes
+3. **Updates README if needed** — Before proceeding with commit
+4. **Commits** — With a descriptive message
+5. **Reports status** — Shows what was committed and commits ahead of origin
+
+### Why two layers?
+
+| Layer | Type | What it checks | Enforcement |
+|-------|------|----------------|-------------|
+| `/ship` skill | Semantic | README *correctly* documents changes | Soft (LLM judgment) |
+| Git pre-commit hook | Syntactic | README was *touched* | Hard (blocks commit) |
+
+The skill does the real work (semantic verification). The hook is a backstop for "forgot entirely."
+
+See [docs/architecture/claude_code.md](docs/architecture/claude_code.md) for details on skills vs hooks.
+
+### First-time setup
+
+**1. Install the `/ship` skill** (required for new clones):
+
+```bash
+mkdir -p ~/.claude/skills
+cp .claude/skills/ship.md ~/.claude/skills/
+```
+
+Then restart your Claude Code session.
+
+**2. Set up the pre-commit hook** (lives in `.git/`, not version-controlled):
 
 ```bash
 cat > .git/hooks/pre-commit << 'EOF'
@@ -171,6 +203,16 @@ fi
 EOF
 chmod +x .git/hooks/pre-commit
 ```
+
+### Bypassing (when needed)
+
+If a code change genuinely doesn't need documentation:
+
+```bash
+git commit --no-verify -m "your message"
+```
+
+Use sparingly. If you're bypassing often, the enforcement is miscalibrated.
 
 ## Why This Way?
 
