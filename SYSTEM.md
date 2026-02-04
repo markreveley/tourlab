@@ -43,15 +43,42 @@ Each date has fields that start unknown (`null`) and get filled in as informatio
 - `production_contact`: Main venue production person
 - `tour_manager_advance`: Notes from TM's advance call
 
+### Show Folders
+
+Each show gets its own folder under `state/`, named `M-D-YY-City` (e.g., `3-15-26-Boston`):
+
+```
+state/3-15-26-Boston/
+  3-15-26-Boston.md    # Show state file (frontmatter + evidence log)
+  email/               # Email threads relevant to this show
+  assets/              # Riders, stage plots, contracts, etc.
+```
+
+- The state file is named the same as its folder
+- `email/` holds source documents the agent reads but never modifies
+- `assets/` holds non-email documents (riders, PDFs, stage plots, contracts)
+
 ### Venue Files
 
-Venues are reusable. When a tour plays the same venue twice, the venue file persists. Venue files contain:
+Venues live in `state/venues/` and are shared across shows. When a tour plays the same venue twice, the venue file persists. Venue files contain:
 - Capacity and layout
 - Permanent contacts
-- Technical specs that don't change
+- Technical specs that don't change between shows
 - Historical notes from previous visits
 
-Date files reference venue files but can override venue defaults for specific dates.
+Named `venue-name-city.md` (e.g., `house-of-blues-boston.md`). Show state files reference venues by name but can override venue defaults for specific dates.
+
+### Personnel Files
+
+Personnel live in `state/personnel/` — a contact and profile database of everyone involved in the tour. One file per person, named `firstname-lastname.md` (e.g., `sarah-chen.md`).
+
+Roles include:
+- **Touring crew** — tour manager, production manager, FOH/monitor engineers, lighting director, etc.
+- **Artist/management** — artist, manager, agent, business manager, publicist
+- **Venue contacts** — production managers, GMs, box office (linked from venue files)
+- **Local sellers** — promoter reps, local production, runners, catering vendors
+
+Each personnel file contains contact info (phone, email), role(s), and notes. Personnel are referenced by name from show and venue files.
 
 ---
 
@@ -64,8 +91,10 @@ Date files reference venue files but can override venue defaults for specific da
 Evidence is a **source document** plus a **direct quote** from that document.
 
 Valid sources:
-- Email threads in `state/emails/`
-- Attached documents (referenced by filename)
+- Email threads in the show's `email/` folder
+- Documents or files in the show's `assets/` folder
+- Venue files in `state/venues/`
+- Personnel files in `state/personnel/`
 - Explicit user instruction ("user confirmed via call")
 
 Invalid sources:
@@ -79,7 +108,7 @@ When you update any field, you MUST append to the Evidence Log section of that f
 
 ```markdown
 ### YYYY-MM-DD — field_name set to value
-Source: emails/thread-name.md
+Source: email/thread-name.md
 Quote: "exact quote from source that justifies this change"
 Changed: `field_name: old_value` → `field_name: new_value`
 ```
@@ -90,13 +119,13 @@ Changed: `field_name: old_value` → `field_name: new_value`
 2. **Quote must be verbatim** — Copy exact text, don't paraphrase
 3. **Quote must be sufficient** — Someone reading only the quote should understand why the field was set
 4. **Date the entry** — Use ISO format (YYYY-MM-DD)
-5. **Source must be a path** — Relative to project root
+5. **Source must be a path** — Relative to the show folder (e.g., `email/production-thread.md`)
 
 ### Example Evidence Entry
 
 ```markdown
 ### 2026-01-28 — load_in_time set to 14:00
-Source: emails/boston-production-thread.md
+Source: email/production-thread.md
 Quote: "Load in will be at 2pm, please have trucks at loading dock by 1:45"
 Changed: `load_in_time: null` → `load_in_time: 14:00`
 ```
@@ -134,11 +163,11 @@ Action: Add to TODO.md, do not set field to partial value:
 ```
 
 **Implicit information:**
-> "See attached rider" (but rider not in emails/)
+> "See attached rider" (but rider not in assets/)
 
 Action: Add to TODO.md:
 ```markdown
-- [ ] Boston 3/15: References attached rider that needs to be added to state/emails/
+- [ ] Boston 3/15: References attached rider that needs to be added to show assets/
 ```
 
 ### TODO.md Format
@@ -162,24 +191,27 @@ Action: Add to TODO.md:
 
 ### Reading Files
 
-You can read any file in `state/` to understand current state. Always read the relevant date file before making updates.
+You can read any file in `state/` to understand current state. Always read the relevant show's state file before making updates.
 
-### Updating Date Files
+### Updating Show Files
 
-1. Read the current file
+1. Read the current show file (e.g., `state/3-15-26-Boston/3-15-26-Boston.md`)
 2. Identify the field(s) to update
-3. Find evidence in source documents
+3. Find evidence in source documents (the show's `email/` or `assets/` folder)
 4. Update the frontmatter field
 5. Append to Evidence Log
 6. If any ambiguity, add to TODO.md instead
 
-### Creating New Files
+### Creating New Shows
 
-Only create new date/venue files when:
+Only create new show folders when:
 - A new date is confirmed (source: email confirming the date)
-- A new venue is referenced that doesn't exist
 
-New files must follow the existing templates.
+To create a new show:
+1. Create the folder: `state/M-D-YY-City/`
+2. Create the state file: `state/M-D-YY-City/M-D-YY-City.md`
+3. Create empty `email/` and `assets/` subdirectories
+4. State file must follow the existing template
 
 ---
 

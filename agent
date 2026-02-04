@@ -8,7 +8,7 @@
 #
 # Usage:
 #   ./agent "what dates are missing tech specs?"
-#   cat state/emails/boston-tech.md | ./agent "extract relevant info"
+#   cat state/3-15-26-Boston/email/tech-thread.md | ./agent "extract relevant info"
 #
 # Environment:
 #   STATE_DIR - Path to state directory (default: ./state)
@@ -32,37 +32,67 @@ command -v agen &>/dev/null || die "agen not found in PATH. Install from https:/
 [[ -f "$SYSTEM_FILE" ]] || die "SYSTEM.md not found"
 [[ -d "$STATE_DIR" ]] || die "state/ directory not found. Set STATE_DIR to your tour state directory."
 
+# Shared directories that are not show folders
+SHARED_DIRS="venues|personnel"
+
 # Build file inventory (pure shell, no LLM)
 build_inventory() {
-  echo "## Available State Files"
+  echo "## Available Shows"
   echo ""
 
-  if [[ -d "$STATE_DIR/dates" ]] && compgen -G "$STATE_DIR/dates/*.md" > /dev/null 2>&1; then
-    echo "### Dates"
-    for f in "$STATE_DIR/dates"/*.md; do
-      echo "- $(basename "$f")"
-    done
-    echo ""
-  fi
+  # Show folders: subdirectories that aren't shared dirs or hidden
+  for show_dir in "$STATE_DIR"/*/; do
+    [[ -d "$show_dir" ]] || continue
+    show_name="$(basename "$show_dir")"
 
+    # Skip shared directories
+    if [[ "$show_name" =~ ^($SHARED_DIRS)$ ]]; then
+      continue
+    fi
+
+    show_file="$show_dir/$show_name.md"
+
+    echo "### $show_name"
+    if [[ -f "$show_file" ]]; then
+      echo "- $show_name.md"
+    fi
+    if [[ -d "$show_dir/email" ]] && compgen -G "$show_dir/email/*" > /dev/null 2>&1; then
+      echo "- email/"
+      for f in "$show_dir/email"/*; do
+        echo "  - $(basename "$f")"
+      done
+    fi
+    if [[ -d "$show_dir/assets" ]] && compgen -G "$show_dir/assets/*" > /dev/null 2>&1; then
+      echo "- assets/"
+      for f in "$show_dir/assets"/*; do
+        echo "  - $(basename "$f")"
+      done
+    fi
+    echo ""
+  done
+
+  # Venues
   if [[ -d "$STATE_DIR/venues" ]] && compgen -G "$STATE_DIR/venues/*.md" > /dev/null 2>&1; then
-    echo "### Venues"
+    echo "## Venues"
+    echo ""
     for f in "$STATE_DIR/venues"/*.md; do
       echo "- $(basename "$f")"
     done
     echo ""
   fi
 
-  if [[ -d "$STATE_DIR/emails" ]] && compgen -G "$STATE_DIR/emails/*.md" > /dev/null 2>&1; then
-    echo "### Emails"
-    for f in "$STATE_DIR/emails"/*.md; do
+  # Personnel
+  if [[ -d "$STATE_DIR/personnel" ]] && compgen -G "$STATE_DIR/personnel/*.md" > /dev/null 2>&1; then
+    echo "## Personnel"
+    echo ""
+    for f in "$STATE_DIR/personnel"/*.md; do
       echo "- $(basename "$f")"
     done
     echo ""
   fi
 
   if [[ -f "$STATE_DIR/TODO.md" ]]; then
-    echo "### Outstanding"
+    echo "## Outstanding"
     echo "- TODO.md"
     echo ""
   fi

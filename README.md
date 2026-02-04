@@ -10,7 +10,7 @@ A **template** for managing concert tour logistics. Tourlab provides the agent, 
 
 The `agent` script wraps [agen](https://github.com/markreveley/agen) with tour-advancing context:
 - SYSTEM.md defines the agent's identity and rules
-- `STATE_DIR` points to your tour data (dates, venues, emails)
+- `STATE_DIR` points to your tour data (shows, venues, personnel)
 - The agent knows what files exist and can reference them
 
 ## Quick Start
@@ -24,11 +24,12 @@ cd tourlab
 # See: https://github.com/markreveley/agen
 
 # 3. Create your tour state (outside tourlab)
-mkdir -p ../my-tour/state/{dates,venues,emails}
+mkdir -p ../my-tour/state/{venues,personnel}
 cd ../my-tour && git init
 
-# 4. Create your first date file
-cat > state/dates/2026-03-15-boston.md << 'EOF'
+# 4. Create your first show
+mkdir -p state/3-15-26-Boston/{email,assets}
+cat > state/3-15-26-Boston/3-15-26-Boston.md << 'EOF'
 ---
 city: Boston
 venue: House of Blues
@@ -64,9 +65,19 @@ AGEN/
 │   └── SYSTEM.md         # Agent identity + evidence protocol
 └── my-tour/              # Your state (separate git repo)
     └── state/
-        ├── dates/        # Per-date files (YYYY-MM-DD-city.md)
-        ├── venues/       # Reusable venue info
-        ├── emails/       # Source documents (agent reads, never modifies)
+        ├── 3-15-26-Boston/          # One folder per show
+        │   ├── 3-15-26-Boston.md    # Show state (frontmatter + evidence log)
+        │   ├── email/               # Email threads for this show
+        │   └── assets/              # Riders, stage plots, contracts
+        ├── 3-17-26-Philadelphia/
+        │   ├── 3-17-26-Philadelphia.md
+        │   ├── email/
+        │   └── assets/
+        ├── venues/                  # Shared venue database
+        │   └── house-of-blues-boston.md
+        ├── personnel/               # Contact & profile database
+        │   ├── sarah-chen.md
+        │   └── mike-torres.md
         ├── context.md    # Working memory
         └── TODO.md       # Outstanding questions
 ```
@@ -109,7 +120,7 @@ Every field change must have an evidence entry:
 
 ```markdown
 ### 2026-01-28 — load_in_time set to 14:00
-Source: emails/boston-production-thread.md
+Source: email/production-thread.md
 Quote: "Load in will be at 2pm, please have trucks at loading dock by 1:45"
 Changed: `load_in_time: null` → `load_in_time: 14:00`
 ```
@@ -123,27 +134,72 @@ No guessing. No inference. If it's ambiguous, it goes to TODO.md as a question.
 git -C ../my-tour log --oneline -10
 
 # What fields are still null for Boston?
-grep ": null" ../my-tour/state/dates/2026-03-15-boston.md
+grep ": null" ../my-tour/state/3-15-26-Boston/3-15-26-Boston.md
 
 # What evidence do we have?
-grep -A3 "^### " ../my-tour/state/dates/*.md
+grep -A3 "^### " ../my-tour/state/*//*.md
 
-# Find dates missing load-in times
-grep -l "load_in_time: null" ../my-tour/state/dates/*.md
+# Find shows missing load-in times
+grep -rl "load_in_time: null" ../my-tour/state/
 ```
 
-## Adding a New Date
+## Adding a New Show
 
-1. Create a new file in `state/dates/` named `YYYY-MM-DD-city.md`
-2. Add YAML frontmatter with all fields set to `null`
-3. Set status to `unconfirmed`, `confirmed`, or `advancing`
-4. Add outstanding questions to the Outstanding section
+1. Create a folder in `state/` named `M-D-YY-City` (e.g., `3-15-26-Boston`)
+2. Create `email/` and `assets/` subdirectories inside it
+3. Create a state file named the same as the folder (e.g., `3-15-26-Boston.md`)
+4. Add YAML frontmatter with all fields set to `null`
+5. Set status to `unconfirmed`, `confirmed`, or `advancing`
+6. Add outstanding questions to the Outstanding section
 
 ## Adding Emails
 
-1. Copy email content to `state/emails/descriptive-name.md`
+1. Copy email content to the show's `email/` folder (e.g., `state/3-15-26-Boston/email/production-thread.md`)
 2. Include headers and timestamps
-3. Run: `cat state/emails/name.md | STATE_DIR=../my-tour/state ./agent "extract info for [city]"`
+3. Run: `cat state/3-15-26-Boston/email/thread.md | STATE_DIR=../my-tour/state ./agent "extract info for boston"`
+
+## Venues
+
+Venue files live in `state/venues/` and are shared across shows. Named `venue-name-city.md`.
+
+```yaml
+---
+name: House of Blues Boston
+slug: house-of-blues-boston
+city: Boston
+state: MA
+capacity: 2400
+stage_width: 48ft
+stage_depth: 32ft
+trim_height: 26ft
+house_console: Avid S6L
+monitor_console: Avid S6L
+house_pa: d&b audiotechnik V-Series
+power_available: 400A 3-phase
+production_manager: null
+production_email: null
+---
+```
+
+Show state files reference venues by name. Venue files persist across tours — tech specs and permanent contacts don't change per show.
+
+## Personnel
+
+Personnel files live in `state/personnel/`, one file per person. Named `firstname-lastname.md`.
+
+Covers touring crew, artist/management, venue contacts, local sellers, promoter reps, runners, catering vendors — anyone the tour interacts with.
+
+```yaml
+---
+name: Sarah Chen
+role: Production Manager
+org: House of Blues Boston
+phone: null
+email: null
+---
+
+## Notes
+```
 
 ## How It Works
 
@@ -154,7 +210,7 @@ The `agent` script is pure shell. It builds context deterministically (no LLM), 
 {
   cat SYSTEM.md
   cat $STATE_DIR/context.md
-  ls $STATE_DIR/dates/*.md $STATE_DIR/venues/*.md
+  ls -d $STATE_DIR/*/          # list show folders
 } > context.tmp
 
 agen --system=context.tmp "$@"
