@@ -10,12 +10,16 @@
 #   ./agent "what dates are missing tech specs?"
 #   cat state/emails/boston-tech.md | ./agent "extract relevant info"
 #
+# Environment:
+#   STATE_DIR - Path to state directory (default: ./state)
+#               Example: STATE_DIR=~/tours/my-tour/state ./agent "query"
+#
 # Requires: agen in PATH (https://github.com/markreveley/agen)
 #
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STATE_DIR="$SCRIPT_DIR/state"
+STATE_DIR="${STATE_DIR:-$SCRIPT_DIR/state}"
 SYSTEM_FILE="$SCRIPT_DIR/SYSTEM.md"
 
 die() {
@@ -26,7 +30,7 @@ die() {
 # Check dependencies
 command -v agen &>/dev/null || die "agen not found in PATH. Install from https://github.com/markreveley/agen"
 [[ -f "$SYSTEM_FILE" ]] || die "SYSTEM.md not found"
-[[ -d "$STATE_DIR" ]] || die "state/ directory not found"
+[[ -d "$STATE_DIR" ]] || die "state/ directory not found. Set STATE_DIR to your tour state directory."
 
 # Build file inventory (pure shell, no LLM)
 build_inventory() {
